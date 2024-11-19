@@ -1,0 +1,5 @@
+numpy
+torch
+plyfile
+open3d
+plyfile
