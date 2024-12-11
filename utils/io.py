@@ -11,12 +11,14 @@ def load_point_cloud(filepath):
     colors = np.asarray(pcd.colors) * 255  # Convert the color range from [0, 1] to [0, 255]
     return data, colors, pcd
 
-def save_point_cloud(points, labels, filename):
+def save_point_cloud(points, colors, filename):
     pcd = o3d.geometry.PointCloud()
+    print("points: ", type(points))
+    print("Points: ", points.shape)
     pcd.points = o3d.utility.Vector3dVector(points)
-    labels = labels.astype(np.int32)
-    colors = plt.get_cmap("tab20")(labels % 20)[:, :3]
-    pcd.colors = o3d.utility.Vector3dVector(colors)
+    if colors is not None:
+        colors = colors / 255.0  # Convert colors back to the range [0, 1] for Open3D
+        pcd.colors = o3d.utility.Vector3dVector(colors)
     o3d.io.write_point_cloud(filename, pcd)
 
 def create_experiment_dir(base_dir):

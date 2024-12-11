@@ -1,13 +1,30 @@
-# utils/downsampling.py
 import numpy as np
-import open3d as o3d
 
-def random_downsample(points, num_points):
-    indices = np.random.choice(points.shape[0], num_points)
-    return points[indices]
+"""
+    Random Downsample will randomly select points until num_points are selected.
 
-def voxel_downsample(points, voxel_size):
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(points)
-    down_pcd = pcd.voxel_down_sample(voxel_size=voxel_size)
-    return np.asarray(down_pcd.points)
+    Focused Downsample will select points to fit a ratio specified. 
+
+"""
+
+def random_downsample(xyz, num_points):
+    num_points_available = xyz.shape[0]
+    if num_points_available < num_points:
+        raise ValueError(f"The point cloud has only {num_points_available} points, fewer than the requested {num_points} points.")
+    indices = np.random.choice(num_points_available, num_points, replace=False)
+    return xyz[indices, :]
+
+def focused_downsample(xyz, colors, num_points, plant_ratio):
+    plant_indices = np.where(np.all(colors == [0, 255, 0], axis=1))[0]
+    background_indices = np.setdiff1d(np.arange(len(xyz)), plant_indices)
+    num_from_labeled = int(num_points * plant_ratio)
+    num_from_scene = num_points - num_from_labeled
+    if len(plant_indices) < num_from_labeled or len(background_indices) < num_from_scene:
+        raise ValueError("Not enough points to sample the specified ratio of labeled to unlabeled points")
+    labeled_selection = np.random.choice(plant_indices, num_from_labeled, replace=False)
+    scene_selection = np.random.choice(background_indices, num_from_scene, replace=False)
+    selected_indices = np.concatenate((labeled_selection, scene_selection))
+    np.random.shuffle(selected_indices)
+    downsampled_xyz = xyz[selected_indices, :]
+    downsampled_colors = colors[selected_indices, :]
+    return downsampled_xyz, downsampled_colors

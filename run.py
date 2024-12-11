@@ -4,22 +4,14 @@ import torch
 import numpy as np
 from models import pointnet2_sem_seg_msg, pointnet2_sem_seg, pointnet_sem_seg
 from utils.io import load_point_cloud, save_metadata, save_point_cloud, log_results, create_experiment_dir
+from utils.downsampling import focused_downsample
+from utils.normalization import normalize_point_cloud
 
 def get_models(config):
     pointnet2_msg_model = {'name': 'PointNet2 MSG', 'model': pointnet2_sem_seg_msg.get_model(config['num_classes'])}
     pointnet2_model = {'name': 'PointNet2', 'model': pointnet2_sem_seg.get_model(config['num_classes'])}
     pointnet_model = {'name': 'PointNet', 'model': pointnet_sem_seg.get_model(config['num_classes'])}
     return [pointnet2_msg_model, pointnet2_model, pointnet_model]
-
-def normalize_point_cloud(points, required_channels=9):
-    centroid = np.mean(points[:, :3], axis=0)
-    points[:, :3] -= centroid
-    furthest_distance = np.max(np.sqrt(np.sum(points[:, :3]**2, axis=1)))
-    points[:, :3] /= furthest_distance
-    if points.shape[1] < required_channels:
-        paddings = np.zeros((points.shape[0], required_channels - points.shape[1]))
-        points = np.hstack((points, paddings))
-    return points, centroid, furthest_distance
 
 def prepare_input_data(data, required_channels=9):
     N, C = data.shape
@@ -58,21 +50,6 @@ def evaluate_accuracy(predictions, labels):
     correct = np.sum(predictions == labels)
     return correct / total if total > 0 else 0.0
 
-def random_downsample(xyz, colors, num_points, plant_ratio):
-    B, C, N = xyz.shape
-    plant_indices = np.where(np.all(colors == [0, 255, 0], axis=1))[0]
-    background_indices = np.setdiff1d(np.arange(N), plant_indices)
-    num_from_labeled = int(num_points * plant_ratio)
-    num_from_scene = num_points - num_from_labeled
-    if len(plant_indices) < num_from_labeled or len(background_indices) < num_from_scene:
-        raise ValueError("Not enough points to sample the specified ratio of labeled to unlabeled points")
-    labeled_selection = np.random.choice(plant_indices, num_from_labeled, replace=False)
-    scene_selection = np.random.choice(background_indices, num_from_scene, replace=False)
-    selected_indices = np.concatenate((labeled_selection, scene_selection))
-    np.random.shuffle(selected_indices)
-    downsampled_xyz = xyz[:, :, selected_indices]
-    downsampled_labels = np.concatenate((np.ones(num_from_labeled), np.zeros(num_from_scene)))
-    return downsampled_xyz, downsampled_labels, selected_indices
 
 def process_scenes(data_path, points_list, batch_size, plant_ratio, models, experiment_dir):
     results_dict = {}
@@ -85,7 +62,7 @@ def process_scenes(data_path, points_list, batch_size, plant_ratio, models, expe
                 continue
             labels = np.all(colors == [0, 255, 0], axis=1).astype(int) # save green points as proper segmentations
             data, centroid, scale = normalize_point_cloud(data)
-            data = prepare_input_data(data, required_channels=9).T
+            data = prepare_input_data(data).T
             data = np.expand_dims(data, axis=0)
             batch_data = np.tile(data, (batch_size, 1, 1))
             results_dict[filename] = {}
@@ -94,7 +71,7 @@ def process_scenes(data_path, points_list, batch_size, plant_ratio, models, expe
                 if batch_data.shape[2] < num_points:
                     log_results(experiment_dir, "errors", f"File {filepath} has fewer points than {num_points}, skipping downsampling.")
                     continue
-                downsampled_data, downsampled_labels, selected_indices = random_downsample(batch_data, colors, num_points, plant_ratio)
+                downsampled_data, downsampled_labels, selected_indices = focused_downsample(batch_data, colors, num_points, plant_ratio)
                 print("downsampled_data: ", downsampled_data, downsampled_data.shape)
                 model_outputs = run_models_on_input(models, downsampled_data, filepath, centroid, scale, num_points)
                 
